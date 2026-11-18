@@ -58,7 +58,7 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "\n"
         "⚡ Streak is now <b>{count}x {SIZE}</b>\n"
         "📊 Last results: {results}\n"
-        "🔜 Next period: <code>{next_issue}</code>\n"
+        "🔜 Next period: <code>{next_issue}</code> → <b>{NEXT_SIZE}</b> {next_icon}\n"
         "🕒 {time}"
     ),
     "end": (
@@ -69,7 +69,10 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "🕒 {time}"
     ),
 }
-DEFAULT_PROGRAM_TEMPLATE = DEFAULT_TEMPLATES["start"]   # kept for older code
+DEFAULT_PROGRAM_TEMPLATE = DEFAULT_TEMPLATES["start"]
+
+# The Alert Page default before the opposite size was added (used to upgrade saved settings)
+_OLD_LOOP_TEMPLATE = DEFAULT_TEMPLATES["loop"].replace(" → <b>{NEXT_SIZE}</b> {next_icon}", "")   # kept for older code
 
 PAGES = ["start", "loop", "end"]
 PAGE_TITLES = {"start": "Start Page", "loop": "Alert Page", "end": "End Page"}
@@ -151,6 +154,10 @@ def load_settings() -> Dict[str, Any]:
     # FIX: deepcopy, otherwise the default block lists were shared and editing
     # the returned settings in place changed DEFAULT_SETTINGS itself.
     settings = {**copy.deepcopy(DEFAULT_SETTINGS), **saved}
+    # Alert Page saved with the OLD default text (before "→ {NEXT_SIZE}" was added):
+    # switch it to the new default. Text you changed yourself is left alone.
+    if settings.get("loop_template") == _OLD_LOOP_TEMPLATE:
+        settings["loop_template"] = DEFAULT_TEMPLATES["loop"]
     # Old settings.json (one alert page): it becomes the Start Page
     if "start_blocks" not in saved and isinstance(saved.get("alert_blocks"), list):
         settings["start_blocks"] = saved["alert_blocks"]

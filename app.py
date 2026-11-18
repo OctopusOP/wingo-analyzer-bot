@@ -43,7 +43,8 @@ from tools_tab import ToolsTab
 from wingo import GAMES, Watcher
 
 PAD = 8  # standard spacing between widgets
-PLACEHOLDERS = "{game} {size} {SIZE} {count} {icon} {results} {issue} {next_issue} {time}"
+PLACEHOLDERS = ("{game} {size} {SIZE} {count} {icon} {results} {issue} {next_issue} "
+                "{next_size} {NEXT_SIZE} {next_icon} {time}")
 END_PLACEHOLDERS = "{break_number} {break_size} {BREAK_SIZE}"   # End Page only: the result that broke it
 PAGE_HELP = {
     "start": "Sent when a Big/Small streak reaches “Start at” (⚙), e.g. the 3rd Big in a row.",

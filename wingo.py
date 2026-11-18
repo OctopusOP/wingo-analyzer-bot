@@ -100,6 +100,10 @@ def build_info(game: str, history: List[Dict[str, Any]], size: str, count: int,
         "results": " ".join(str(r["number"]) for r in streak),  # 7 9 8 (newest first)
         "issue": streak[0]["issue"] if streak else "",        # newest period of the streak
         "next_issue": next_issue,                             # period running now
+        # The opposite size of the streak (Big streak -> Small), e.g. "Next: SMALL"
+        "next_size": "Small" if size == "Big" else "Big",     # Small
+        "NEXT_SIZE": "SMALL" if size == "Big" else "BIG",     # SMALL
+        "next_icon": "💧" if size == "Big" else "🔥",
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "stage": stage,                                       # start / loop / end
         # Only filled on the End Page: the result that broke the streak

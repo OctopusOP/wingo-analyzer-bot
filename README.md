@@ -107,6 +107,9 @@ Write these in any message; they are filled in when the alert is sent.
 | `{results}`    | 7 9 8                | the streak numbers, newest first |
 | `{issue}`      | 20261118100010644    | period that made the streak      |
 | `{next_issue}` | 20261118100010645    | the period running now           |
+| `{next_size}`  | Small                | the OPPOSITE size of the streak  |
+| `{NEXT_SIZE}`  | SMALL                | same, in capitals                |
+| `{next_icon}`  | 💧 / 🔥              | icon of the opposite size        |
 | `{time}`       | 2026-11-18 14:02:11  | when the alert was sent          |
 
 End Page only (the result that broke the streak; `{count}`/`{SIZE}` there = the finished streak):
