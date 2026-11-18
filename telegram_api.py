@@ -209,6 +209,40 @@ class TelegramBot:
         return self.call("forwardMessages", {"chat_id": chat_id, "from_chat_id": from_chat_id,
                                              "message_ids": message_ids}, timeout=120)
 
+    # ------------------------------------------------------------------
+    # Channel tools (used by the 🛠 Channel Tools tab)
+    # ------------------------------------------------------------------
+    def delete_message(self, chat_id: Any, message_id: int) -> bool:
+        return bool(self.call("deleteMessage", {"chat_id": chat_id, "message_id": message_id}))
+
+    def delete_messages(self, chat_id: Any, message_ids: List[int]) -> bool:
+        """Deletes up to 100 messages in one call. Ones that don't exist are skipped by Telegram."""
+        return bool(self.call("deleteMessages", {"chat_id": chat_id, "message_ids": message_ids}, timeout=60))
+
+    def get_chat_member(self, chat_id: Any, user_id: int) -> Dict[str, Any]:
+        """Someone's role in a chat (we use it to read the bot's own admin rights)."""
+        return self.call("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+
+    def get_member_count(self, chat_id: Any) -> int:
+        return int(self.call("getChatMemberCount", {"chat_id": chat_id}))
+
+    def create_invite_link(self, chat_id: Any, name: str = "", member_limit: int = 0,
+                           join_request: bool = False) -> str:
+        """Makes a new invite link. join_request=True -> people must be approved."""
+        params: Dict[str, Any] = {"chat_id": chat_id, "creates_join_request": join_request}
+        if name:
+            params["name"] = name[:32]
+        if member_limit and not join_request:   # Telegram doesn't allow both together
+            params["member_limit"] = member_limit
+        return self.call("createChatInviteLink", params)["invite_link"]
+
+    def pin_message(self, chat_id: Any, message_id: int, silent: bool = True) -> bool:
+        return bool(self.call("pinChatMessage", {"chat_id": chat_id, "message_id": message_id,
+                                                 "disable_notification": silent}))
+
+    def unpin_all(self, chat_id: Any) -> bool:
+        return bool(self.call("unpinAllChatMessages", {"chat_id": chat_id}))
+
     @staticmethod
     def file_id_of(message: Dict[str, Any]) -> Optional[str]:
         """Returns the reusable file_id from a sent message (largest photo size)."""

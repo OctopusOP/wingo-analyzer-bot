@@ -70,6 +70,21 @@ any files your boxes use, at the same paths) to the server.
 
 **Broadcast** — boxes sent to the channel right now with **Send now**.
 
+**🛠 Channel Tools** — separate from the alerts. It can use a **different bot**
+and works with **many channels** (the bot must be **admin** in each one):
+- **Bots & Channels**: save bots (name + token) and channels (name + `@name` / `-100…`,
+  or paste a post link). **Check** shows members and the bot's admin rights.
+- **Copy**: copy messages *from → to* (number or post link) from one channel into
+  one or more channels, in order, albums kept. **Copy** = no "Forwarded from",
+  **Forward** = keep it. You can also paste many links from any channels.
+- **Delete**: delete messages *from → to* in a channel. ⚠ Can't be undone; the bot
+  needs the "Delete messages" right; Telegram may refuse posts older than 48 h.
+- **Post to many**: message boxes (text / file / link) sent to all picked channels.
+- **More**: channel info, make an invite link (limit / needs approval), pin, unpin all.
+- **Find newest #**: fills in the newest message number (posts a tiny message and
+  deletes it right away, silently).
+- **■ Stop** stops a running job; a progress bar and log show what happens.
+
 **⚙ Settings**
 - Bot token and channel (`@mychannel` or `-1001234567890`)
 - Game: `WinGo_30S`, `WinGo_1M`, `WinGo_3M` or `WinGo_5M`

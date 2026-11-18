@@ -9,6 +9,8 @@ Tabs (left to right):
   Alert Page   sent AGAIN for every next result while the streak goes on (4, 5, 6…)
   End Page     sent once when the streak breaks
   Broadcast    message boxes you send to the channel right now ("Send now")
+  🛠 Channel Tools   separate tools with their own bot + many channels:
+               copy a range of messages, delete a range, post to many, invite links… (tools_tab.py)
   ⚙            bot token, channel, game, "Start at"
 
   Flow:  Start Page  ->  Alert Page (loops while the streak lasts)  ->  End Page
@@ -37,6 +39,7 @@ import storage
 from links import parse_many
 from sender import get_sender, sample_info
 from telegram_api import TelegramBot, TelegramError
+from tools_tab import ToolsTab
 from wingo import GAMES, Watcher
 
 PAD = 8  # standard spacing between widgets
@@ -340,6 +343,9 @@ class App(tk.Tk):
         self.broadcast_tab = ttk.Frame(tabs, padding=PAD)
         self.settings_tab = ttk.Frame(tabs, padding=PAD)
         tabs.add(self.broadcast_tab, text="  Broadcast  ")
+        # 🛠 Channel Tools: copy / delete / post across many channels (own bot possible)
+        self.tools_tab = ToolsTab(tabs, self, BlocksEditor)
+        tabs.add(self.tools_tab, text="  🛠 Channel Tools  ")
         tabs.add(self.settings_tab, text="  ⚙  ")
         self._build_broadcast(settings)
         self._build_settings(settings)
@@ -661,6 +667,8 @@ class App(tk.Tk):
                 elif kind == "alert":
                     if self.watcher:      # ignore alerts that arrive right after Stop
                         self.fire_alert(data)
+                elif kind == "call":      # Channel Tools: run this on the main thread
+                    data()
                 elif kind == "check":
                     self.check_result.configure(text=data[0], foreground=data[1])
         except queue.Empty:
@@ -671,6 +679,11 @@ class App(tk.Tk):
         if any(self.dirty.values()) and not messagebox.askyesno(
                 "Unsaved changes", "You have unsaved message boxes. Close anyway?"):
             return
+        if self.tools_tab.job and not messagebox.askyesno(
+                "Channel Tools busy", "A copy / delete / post job is still running. Stop it and close?"):
+            return
+        if self.tools_tab.job:
+            self.tools_tab.job.stop()
         if self.watcher:
             self.watcher.stop()
         self.destroy()

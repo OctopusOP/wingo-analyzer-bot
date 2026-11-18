@@ -94,6 +94,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "end_blocks": default_blocks(), "end_template": DEFAULT_TEMPLATES["end"],
     # Broadcast page: your boxes only, sent when you press "Send now"
     "broadcast_blocks": [empty_box(), empty_box(), empty_box()],
+    # 🛠 Channel Tools tab (separate from the alerts; can use another bot)
+    "tools_bots": [],            # [{"name": "Copy bot", "token": "123:ABC…"}]
+    "tools_channels": [],        # [{"name": "Main", "id": "@mychannel" or "-100…"}]
+    "tools_bot": "",             # name of the bot the tools use ("" = the alert bot)
+    "tools_delay": 1.0,          # seconds between Telegram calls in the tools
+    "tools_post_blocks": [],     # message boxes on "Post to many"
 }
 
 
