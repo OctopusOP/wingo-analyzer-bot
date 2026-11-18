@@ -1,0 +1,14 @@
+# Private: holds your bot token + message boxes. NEVER upload it.
+settings.json
+settings.*.json
+file_ids.json
+*.tmp
+
+# Python environment + caches (rebuilt by start.sh / start.bat)
+.venv/
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db

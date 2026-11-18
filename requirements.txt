@@ -1,0 +1,10 @@
+# Packages the WinGo Alert app needs. The start scripts (start.sh / start.bat)
+# install these automatically into a private ".venv" folder.
+#
+# Everything else the app uses (tkinter, urllib, json, threading...) is
+# built into Python 3.8+.
+
+# Up-to-date SSL certificates so HTTPS calls to Telegram and the WinGo API
+# work on every Python install (fixes "CERTIFICATE_VERIFY_FAILED" on
+# python.org builds for macOS).
+certifi>=2024.2.2
