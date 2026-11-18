@@ -189,7 +189,10 @@ def page_job(settings: Dict[str, Any], page: str):
     is THIS page's program message — that's the key sender.py reads).
     """
     snapshot = dict(settings)
-    snapshot["program_template"] = settings.get(f"{page}_template") or DEFAULT_TEMPLATES[page]
+    saved = settings.get(f"{page}_template")
+    # An EMPTY program message is allowed: it means "don't send one" (sender.py skips it).
+    # Only a missing value falls back to the default text.
+    snapshot["program_template"] = DEFAULT_TEMPLATES[page] if saved is None else saved
     return settings[f"{page}_blocks"], snapshot
 
 

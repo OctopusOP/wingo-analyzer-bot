@@ -93,7 +93,12 @@ class Sender(threading.Thread):
         steps: List[Callable] = []
 
         if block.get("type") == "program":
-            text = fill(settings.get("program_template") or storage.DEFAULT_PROGRAM_TEMPLATE, info)
+            template = settings.get("program_template")
+            if template is None:                      # not set at all -> default text
+                template = storage.DEFAULT_PROGRAM_TEMPLATE
+            text = fill(template, info).strip()
+            if not text:                              # you cleared it -> send no program message
+                return steps
             steps.append(lambda bot, chat: self._text(bot, chat, text))
             return steps
 

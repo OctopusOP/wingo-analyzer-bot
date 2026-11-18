@@ -212,7 +212,7 @@ class ProgramWidget(ttk.LabelFrame):
         self.text.edit_modified(False)
         self.text.bind("<<Modified>>", self._text_changed)
 
-        ttk.Label(self, text=f"Filled in automatically:\n{PLACEHOLDERS} {extra_help}", foreground="gray",
+        ttk.Label(self, text=f"Empty + 💾 Save = no program message is sent.\n\nFilled in automatically:\n{PLACEHOLDERS} {extra_help}", foreground="gray",
                   wraplength=220, justify="left").grid(row=0, column=1, sticky="nw")
         ttk.Button(self, text="Reset text", command=self.reset).grid(row=1, column=1, sticky="sw")
 
