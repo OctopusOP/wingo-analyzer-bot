@@ -13,7 +13,13 @@ A "block" is one thing in the send list (sent top to bottom, one by one):
       -> a message box YOU write. Any part may be empty.
   {"type": "program"}
       -> the place where the program's alert message goes
-         (its text is settings["program_template"])
+         (its text is the page's template, e.g. settings["start_template"])
+
+There are 3 alert pages, one per stage of a streak (see wingo.py):
+  start  Start Page   sent when the streak reaches "Start at" (e.g. 3 Big)
+  loop   Alert Page   sent again for every next result of the same size (4, 5, 6…)
+  end    End Page     sent once when the streak breaks
+Each page = its own message boxes + its own program message.
 """
 
 import copy
@@ -37,27 +43,55 @@ def empty_box() -> Dict[str, str]:
     return {"type": "box", "text": "", "file": "", "link": ""}
 
 
-# The alert message the program writes. {placeholders} are filled in at send time.
-DEFAULT_PROGRAM_TEMPLATE = (
-    "🎯 <b>{game} Alert!</b> {icon}\n"
-    "\n"
-    "⚡ <b>{count}x {SIZE}</b> in a row\n"
-    "📊 Last results: {results}\n"
-    "🔜 Next period: <code>{next_issue}</code>\n"
-    "🕒 {time}"
-)
+# The program message for each page. {placeholders} are filled in at send time.
+DEFAULT_TEMPLATES: Dict[str, str] = {
+    "start": (
+        "🎯 <b>{game} Alert!</b> {icon}\n"
+        "\n"
+        "⚡ <b>{count}x {SIZE}</b> in a row\n"
+        "📊 Last results: {results}\n"
+        "🔜 Next period: <code>{next_issue}</code>\n"
+        "🕒 {time}"
+    ),
+    "loop": (
+        "🔁 <b>Still {SIZE}!</b> {icon}\n"
+        "\n"
+        "⚡ Streak is now <b>{count}x {SIZE}</b>\n"
+        "📊 Last results: {results}\n"
+        "🔜 Next period: <code>{next_issue}</code>\n"
+        "🕒 {time}"
+    ),
+    "end": (
+        "🛑 <b>Streak ended</b>\n"
+        "\n"
+        "It was <b>{count}x {SIZE}</b>, then <b>{break_number} {BREAK_SIZE}</b> came\n"
+        "🔜 Next period: <code>{next_issue}</code>\n"
+        "🕒 {time}"
+    ),
+}
+DEFAULT_PROGRAM_TEMPLATE = DEFAULT_TEMPLATES["start"]   # kept for older code
+
+PAGES = ["start", "loop", "end"]
+PAGE_TITLES = {"start": "Start Page", "loop": "Alert Page", "end": "End Page"}
+
+
+def default_blocks():
+    """New page layout like the sketch: box 1, box 2, the program message, box 3, box 4."""
+    return [empty_box(), empty_box(), {"type": "program"}, empty_box(), empty_box()]
+
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "token": "",
     "channel": "",               # "@mychannel" or "-1001234567890"
     "game": "WinGo_1M",          # WinGo_30S / WinGo_1M / WinGo_3M / WinGo_5M
-    "alert_at": "3,4",           # send when a Big/Small streak reaches these lengths
+    "start_at": 3,               # streak length that sends the Start Page
     "poll_seconds": 3,           # how often to ask the WinGo API for new results
     "delay_seconds": 1.0,        # pause between messages (keeps the order + avoids Telegram limits)
     "auto_start": False,         # start watching as soon as the app opens
-    # Alert page, same layout as the sketch: boxes 1-3, the program message, boxes 4-5
-    "alert_blocks": [empty_box(), empty_box(), empty_box(), {"type": "program"}, empty_box(), empty_box()],
-    "program_template": DEFAULT_PROGRAM_TEMPLATE,
+    # The 3 pages: <page>_blocks = boxes + program message, <page>_template = program message text
+    "start_blocks": default_blocks(), "start_template": DEFAULT_TEMPLATES["start"],
+    "loop_blocks": default_blocks(), "loop_template": DEFAULT_TEMPLATES["loop"],
+    "end_blocks": default_blocks(), "end_template": DEFAULT_TEMPLATES["end"],
     # Broadcast page: your boxes only, sent when you press "Send now"
     "broadcast_blocks": [empty_box(), empty_box(), empty_box()],
 }
@@ -111,13 +145,39 @@ def load_settings() -> Dict[str, Any]:
     # FIX: deepcopy, otherwise the default block lists were shared and editing
     # the returned settings in place changed DEFAULT_SETTINGS itself.
     settings = {**copy.deepcopy(DEFAULT_SETTINGS), **saved}
-    # The alert list must always contain exactly one program message
-    raw = settings["alert_blocks"] if isinstance(settings["alert_blocks"], list) else []  # FIX: null/non-list crashed
-    blocks = [b for b in raw if isinstance(b, dict)]
-    if not any(b.get("type") == "program" for b in blocks):
-        blocks.append({"type": "program"})
-    settings["alert_blocks"] = blocks
+    # Old settings.json (one alert page): it becomes the Start Page
+    if "start_blocks" not in saved and isinstance(saved.get("alert_blocks"), list):
+        settings["start_blocks"] = saved["alert_blocks"]
+        settings["start_template"] = saved.get("program_template") or DEFAULT_TEMPLATES["start"]
+    if "start_at" not in saved and saved.get("alert_at"):
+        settings["start_at"] = min(parse_alert_at(saved["alert_at"]) or {3})
+    # Every page must contain exactly one program message
+    for page in PAGES:
+        key = f"{page}_blocks"
+        raw = settings[key] if isinstance(settings[key], list) else []  # FIX: null/non-list crashed
+        blocks = [b for b in raw if isinstance(b, dict)]
+        if not any(b.get("type") == "program" for b in blocks):
+            blocks.append({"type": "program"})
+        settings[key] = blocks
     return settings
+
+
+def get_start_at(settings: Dict[str, Any]) -> int:
+    """'Start at' as a whole number of 2 or more (bad values -> 3)."""
+    try:
+        return max(2, int(float(settings.get("start_at", 3))))
+    except (TypeError, ValueError):
+        return 3
+
+
+def page_job(settings: Dict[str, Any], page: str):
+    """
+    What to send for one page: (blocks, settings copy whose "program_template"
+    is THIS page's program message — that's the key sender.py reads).
+    """
+    snapshot = dict(settings)
+    snapshot["program_template"] = settings.get(f"{page}_template") or DEFAULT_TEMPLATES[page]
+    return settings[f"{page}_blocks"], snapshot
 
 
 def save_settings(settings: Dict[str, Any]) -> None:

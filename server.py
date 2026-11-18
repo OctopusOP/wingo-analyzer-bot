@@ -1,9 +1,11 @@
 """
 server.py — WinGo Alert WITHOUT a window (for a Linux server / VPS / SSH)
 ========================================================================
-Watches the WinGo results and, when a Big/Small streak reaches one of your
-alert numbers (e.g. 3 or 4), sends your saved Alert Page (message boxes +
-the program message) to the Telegram channel, one by one.
+Watches the WinGo results and sends your saved pages to the Telegram
+channel, one message at a time:
+  Start Page  when a Big/Small streak reaches "Start at" (e.g. 3)
+  Alert Page  again for every next result of the same size (4, 5, 6…)
+  End Page    once, when the streak breaks
 Everything is logged to the terminal.
 
     ./start.sh --server        (recommended: sets everything up first)
@@ -11,7 +13,7 @@ Everything is logged to the terminal.
     python3 server.py          (direct)
 
 It uses the same settings.json as the window app. Easiest setup:
-  1. Fill in ⚙ Settings and the Alert Page in the window app on a computer
+  1. Fill in ⚙ Settings and the 3 pages in the window app on a computer
      with a screen, and press 💾 Save.
   2. Copy settings.json (and any files used in your message boxes, at the
      same paths) into this folder on the server.
@@ -45,9 +47,11 @@ def get_settings() -> Dict[str, Any]:
 
 
 def on_alert(info: Dict[str, str]) -> None:
-    """A streak hit an alert length: queue the saved Alert Page for sending."""
+    """Start / loop / end of a streak: queue that page (as last saved) for sending."""
     settings = get_settings()  # fresh copy, so the latest saved boxes are used
-    get_sender().add_job(f"Alert {info['count']}x {info['SIZE']}", settings["alert_blocks"], info, settings)
+    page = info.get("stage", "start")
+    blocks, snapshot = storage.page_job(settings, page)
+    get_sender().add_job(f"{storage.PAGE_TITLES[page]} ({info['count']}x {info['SIZE']})", blocks, info, snapshot)
 
 
 def main() -> None:
@@ -58,7 +62,7 @@ def main() -> None:
               f"Settings file: {storage.SETTINGS_FILE}\n\n"
               "How to set them:\n"
               "  • Open the window app (./start.sh or start.bat) on a computer with a screen,\n"
-              "    fill in ⚙ Settings + the Alert Page, press 💾 Save, then copy settings.json here.\n"
+              "    fill in ⚙ Settings + the pages, press 💾 Save, then copy settings.json here.\n"
               "  • Or edit settings.json yourself, for example:\n"
               '      {"token": "123456789:AA...your bot token...", "channel": "@mychannel"}\n')
         sys.exit(1)
@@ -76,7 +80,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, stop)
 
     log(f"Server mode · channel {settings['channel']} · game {settings.get('game')} · "
-        f"alert at {settings.get('alert_at')} · Ctrl+C to stop")
+        f"start at {storage.get_start_at(settings)} · Ctrl+C to stop")
     log("Alerts fire only for NEW results from now on.")
     watcher.start()
 

@@ -6,9 +6,14 @@ Reads WinGo results from the public API and spots Big/Small streaks.
   Number 0-4 = Small, 5-9 = Big.
   A "streak" = how many of the newest results in a row have the same size.
 
-The Watcher thread asks the API every few seconds. When a NEW result comes
-out and the streak length is one of your alert numbers (e.g. 3 or 4), it
-calls on_alert(info) exactly once for that result.
+The Watcher thread asks the API every few seconds and follows each streak
+through three STAGES (info["stage"] tells which page to send):
+
+  "start"  a new result makes the streak reach "Start at" (e.g. 3 Big)  -> Start Page
+  "loop"   the next result is the SAME size again (4, 5, 6 ...)         -> Alert Page (every time)
+  "end"    the next result is the OTHER size: the streak broke          -> End Page (once)
+
+Each new result triggers at most one stage, so nothing is sent twice.
 """
 
 import json
@@ -72,9 +77,14 @@ def current_streak(history: List[Dict[str, Any]]):
 
 
 def build_info(game: str, history: List[Dict[str, Any]], size: str, count: int,
-               next_issue: str = "") -> Dict[str, str]:
-    """All values the {placeholders} in your messages can use."""
-    streak = history[:count]
+               next_issue: str = "", stage: str = "start",
+               breaker: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """
+    All values the {placeholders} in your messages can use.
+    For the End Page, `history` starts with the result that BROKE the streak
+    (`breaker`); {count}/{size}/{results} still describe the finished streak.
+    """
+    streak = history[1:count + 1] if breaker else history[:count]
     if not next_issue and history:
         # Best guess when the API didn't answer: last period + 1
         try:
@@ -88,9 +98,14 @@ def build_info(game: str, history: List[Dict[str, Any]], size: str, count: int,
         "count": str(count),                                  # 3
         "icon": "🔥" if size == "Big" else "💧",
         "results": " ".join(str(r["number"]) for r in streak),  # 7 9 8 (newest first)
-        "issue": history[0]["issue"] if history else "",      # period that made the streak
+        "issue": streak[0]["issue"] if streak else "",        # newest period of the streak
         "next_issue": next_issue,                             # period running now
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "stage": stage,                                       # start / loop / end
+        # Only filled on the End Page: the result that broke the streak
+        "break_number": str(breaker["number"]) if breaker else "",
+        "break_size": breaker["size"] if breaker else "",
+        "BREAK_SIZE": breaker["size"].upper() if breaker else "",
     }
 
 
@@ -103,7 +118,7 @@ class Watcher(threading.Thread):
     """
     Background thread that polls the API.
       on_update(history, size, count)  every successful poll (for the Home tab)
-      on_alert(info)                   when a streak reaches an alert length
+      on_alert(info)                   start / loop / end of a streak (info["stage"])
       on_log(text)                     status / errors
     Settings are read through get_settings() on every poll, so changes
     saved in the window apply without restarting.
@@ -122,7 +137,9 @@ class Watcher(threading.Thread):
         self.stop_event.set()
 
     def run(self):
-        from storage import parse_alert_at
+        from storage import get_start_at
+        active: Optional[str] = None       # "Big"/"Small" while a streak is being alerted, else None
+        active_count = 0                   # length of that streak the last time we sent
         last_issue: Optional[str] = None   # newest period we have already looked at
         last_game: Optional[str] = None
         failures = 0
@@ -136,6 +153,7 @@ class Watcher(threading.Thread):
                 wait = 3
             if game != last_game:            # game changed -> start fresh
                 last_issue, last_game = None, game
+                active, active_count = None, 0
                 self.on_log(f"Watching {game}…")
             try:
                 history = fetch_history(game)
@@ -169,8 +187,35 @@ class Watcher(threading.Thread):
                                     f"(streak {count}). Waiting for new results…")
                     elif newest != previous:
                         self.on_log(f"New result #{newest[-5:]}: {history[0]['number']} {size} → {count}x {size}")
-                        if count in parse_alert_at(settings.get("alert_at", "3,4")):
-                            info = build_info(game, history, size, count, fetch_next_issue(game))
+                        stage, info = None, None
+                        if active is None:
+                            # No streak being followed: START when it reaches "Start at"
+                            if count >= get_start_at(settings):   # >= : still starts if a check was missed
+                                stage = "start"
+                                info = build_info(game, history, size, count, fetch_next_issue(game), stage)
+                                active, active_count = size, count
+                        elif size == active and count > active_count:
+                            # Same size again -> the streak goes on: send the Alert Page again
+                            stage = "loop"
+                            info = build_info(game, history, size, count, fetch_next_issue(game), stage)
+                            active_count = count
+                        else:
+                            # Other size -> the streak broke: send the End Page once.
+                            # (Same size but SHORTER = a whole break happened between two
+                            # checks, e.g. the API was down; the breaker is further back.)
+                            stage = "end"
+                            skip = 0 if size != active else count
+                            past = history[skip:]          # starts with the result that broke it
+                            breaker = past[0] if past else history[0]
+                            final = 0                      # length of the finished streak
+                            for r in past[1:]:
+                                if r["size"] != active:
+                                    break
+                                final += 1
+                            info = build_info(game, past or history, active, max(final, active_count),
+                                              fetch_next_issue(game), stage, breaker)
+                            active, active_count = None, 0
+                        if info:
                             self.on_alert(info)
                 except Exception as e:
                     self.on_log(f"Watcher error: {e}")

@@ -3,13 +3,18 @@ app.py — WinGo Alert (desktop app for Mac, Linux and Windows)
 =============================================================
 Run it with:   python3 app.py        (or ./start.sh / start.bat)
 
-Tabs (left to right, like the sketch):
+Tabs (left to right):
   Home         Start / Stop watching, live results, current streak, log
-  Alert Page   your message boxes + the program message. When a Big/Small
-               streak hits 3 or 4 (⚙ "Alert at"), ALL of them are sent to the
-               channel one by one, top to bottom.
+  Start Page   sent when a Big/Small streak reaches "Start at" (e.g. 3 in a row)
+  Alert Page   sent AGAIN for every next result while the streak goes on (4, 5, 6…)
+  End Page     sent once when the streak breaks
   Broadcast    message boxes you send to the channel right now ("Send now")
-  ⚙            bot token, channel, game, alert rules
+  ⚙            bot token, channel, game, "Start at"
+
+  Flow:  Start Page  ->  Alert Page (loops while the streak lasts)  ->  End Page
+
+Every page has its own message boxes + its own program message, sent to the
+channel one by one, top to bottom.
 
 Each message box = text + "+ Add File" + "+ Paste link". Press 💾 Save:
 alerts always use the SAVED version, so half-typed edits are never sent.
@@ -36,6 +41,12 @@ from wingo import GAMES, Watcher
 
 PAD = 8  # standard spacing between widgets
 PLACEHOLDERS = "{game} {size} {SIZE} {count} {icon} {results} {issue} {next_issue} {time}"
+END_PLACEHOLDERS = "{break_number} {break_size} {BREAK_SIZE}"   # End Page only: the result that broke it
+PAGE_HELP = {
+    "start": "Sent when a Big/Small streak reaches “Start at” (⚙), e.g. the 3rd Big in a row.",
+    "loop": "Sent AGAIN after every next result of the same size while the streak goes on (4, 5, 6…).",
+    "end": "Sent once when the streak breaks (the other size comes). Then it waits for a new streak.",
+}
 
 
 # =============================================================================
@@ -187,16 +198,17 @@ class BoxWidget(ttk.LabelFrame):
 # The program message (the alert text the app writes) — movable, not deletable
 # =============================================================================
 class ProgramWidget(ttk.LabelFrame):
-    def __init__(self, editor: "BlocksEditor", template: str):
-        super().__init__(editor.scroll.inner, text="🎯 The Program message (alert)", padding=6)
+    def __init__(self, editor: "BlocksEditor", template: str, default_template: str, extra_help: str = ""):
+        super().__init__(editor.scroll.inner, text="🎯 The Program message", padding=6)
         self.editor = editor
+        self.default_template = default_template   # what "Reset text" puts back
         self.text = tk.Text(self, height=6, wrap="word", undo=True, background="#fff8e6", foreground="#222")
         self.text.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, PAD))
         self.text.insert("1.0", template)
         self.text.edit_modified(False)
         self.text.bind("<<Modified>>", self._text_changed)
 
-        ttk.Label(self, text=f"Filled in automatically:\n{PLACEHOLDERS}", foreground="gray",
+        ttk.Label(self, text=f"Filled in automatically:\n{PLACEHOLDERS} {extra_help}", foreground="gray",
                   wraplength=220, justify="left").grid(row=0, column=1, sticky="nw")
         ttk.Button(self, text="Reset text", command=self.reset).grid(row=1, column=1, sticky="sw")
 
@@ -214,7 +226,7 @@ class ProgramWidget(ttk.LabelFrame):
 
     def reset(self):
         self.text.delete("1.0", "end")
-        self.text.insert("1.0", storage.DEFAULT_PROGRAM_TEMPLATE)
+        self.text.insert("1.0", self.default_template)
 
     def _text_changed(self, _event=None):
         if self.text.edit_modified():
@@ -235,7 +247,7 @@ class BlocksEditor(ttk.Frame):
         self.scroll.pack(fill="both", expand=True)
         self._loading = False
 
-    def load(self, blocks, template=""):
+    def load(self, blocks, template="", default_template="", extra_help=""):
         """Builds the widgets from saved blocks."""
         self._loading = True
         for w in self.widgets:
@@ -243,7 +255,7 @@ class BlocksEditor(ttk.Frame):
         self.widgets, self.program = [], None
         for b in blocks:
             if b.get("type") == "program":
-                self.program = ProgramWidget(self, template)
+                self.program = ProgramWidget(self, template, default_template, extra_help)
                 self.widgets.append(self.program)
             else:
                 self.widgets.append(BoxWidget(self, b))
@@ -313,22 +325,28 @@ class App(tk.Tk):
         tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True, padx=PAD, pady=PAD)
         self.home_tab = ttk.Frame(tabs, padding=PAD)
-        self.alert_tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(self.home_tab, text="  Home  ")
+        self._build_home()
+
+        # The 3 pages: Start -> Alert (loop) -> End
+        self.editors = {}        # page -> BlocksEditor
+        self.dirty = {}          # page (or "broadcast") -> unsaved changes?
+        self.dirty_labels = {}   # page (or "broadcast") -> "● unsaved changes" label
+        for page in storage.PAGES:
+            tab = ttk.Frame(tabs, padding=PAD)
+            tabs.add(tab, text=f"  {storage.PAGE_TITLES[page]}  ")
+            self._build_page(tab, page, settings)
+
         self.broadcast_tab = ttk.Frame(tabs, padding=PAD)
         self.settings_tab = ttk.Frame(tabs, padding=PAD)
-        tabs.add(self.home_tab, text="  Home  ")
-        tabs.add(self.alert_tab, text="  Alert Page  ")
         tabs.add(self.broadcast_tab, text="  Broadcast  ")
         tabs.add(self.settings_tab, text="  ⚙  ")
-
-        self._build_home()
-        self._build_alert(settings)
         self._build_broadcast(settings)
         self._build_settings(settings)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(100, self._drain_queue)
-        self.log("App opened. Fill in ⚙ Settings, write your Alert Page, then press ▶ Start on Home.")
+        self.log("App opened. Fill in ⚙ Settings, write your Start / Alert / End pages, then press ▶ Start.")
         if settings.get("auto_start") and settings.get("token") and settings.get("channel"):
             self.after(500, self.start_watching)
 
@@ -342,7 +360,6 @@ class App(tk.Tk):
         self.start_btn.pack(side="left")
         self.status_label = ttk.Label(top, text="● Stopped", foreground="#d33", font=("", 13, "bold"))
         self.status_label.pack(side="left", padx=PAD)
-        ttk.Button(top, text="Send test alert", command=self.send_test_alert).pack(side="right")
 
         info = ttk.LabelFrame(self.home_tab, text="Live", padding=PAD)
         info.pack(fill="x", pady=PAD)
@@ -357,12 +374,15 @@ class App(tk.Tk):
         ttk.Label(info, text="Current streak:").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.streak_label = ttk.Label(info, text="—", font=("", 13, "bold"))
         self.streak_label.grid(row=1, column=1, sticky="w", padx=PAD, pady=(6, 0))
-        ttk.Label(info, text="Alerts sent:").grid(row=2, column=0, sticky="w")
+        ttk.Label(info, text="Stage:").grid(row=2, column=0, sticky="w")
+        self.stage_label = ttk.Label(info, text="waiting for a streak")
+        self.stage_label.grid(row=2, column=1, sticky="w", padx=PAD)
+        ttk.Label(info, text="Pages sent:").grid(row=4, column=0, sticky="w")
         self.count_label = ttk.Label(info, text="0")
-        self.count_label.grid(row=2, column=1, sticky="w", padx=PAD)
-        ttk.Label(info, text="Last check:").grid(row=3, column=0, sticky="w")
+        self.count_label.grid(row=4, column=1, sticky="w", padx=PAD)
+        ttk.Label(info, text="Last check:").grid(row=5, column=0, sticky="w")
         self.check_label = ttk.Label(info, text="—", foreground="gray")
-        self.check_label.grid(row=3, column=1, sticky="w", padx=PAD)
+        self.check_label.grid(row=5, column=1, sticky="w", padx=PAD)
 
         ttk.Label(self.home_tab, text="Log", font=("", 12, "bold")).pack(anchor="w")
         self.log_box = ScrolledText(self.home_tab, height=14, state="disabled", wrap="word")
@@ -402,9 +422,6 @@ class App(tk.Tk):
         if not settings.get("token") or not settings.get("channel"):
             messagebox.showwarning("Settings missing", "Add the bot token and channel in ⚙ first, then Save.")
             return
-        if not storage.parse_alert_at(settings.get("alert_at", "")):
-            messagebox.showwarning("Alert at", "Set ⚙ 'Alert at' to numbers like 3,4.")
-            return
         self.watcher = Watcher(
             get_settings=storage.load_settings,   # re-read each poll -> saved changes apply live
             on_alert=lambda info: self.q.put(("alert", info)),
@@ -413,8 +430,9 @@ class App(tk.Tk):
         )
         self.watcher.start()
         self.start_btn.configure(text="■ Stop")
-        self.status_label.configure(text=f"● Watching {settings['game']}  (alert at {settings['alert_at']})",
+        self.status_label.configure(text=f"● Watching {settings['game']}  (start at {storage.get_start_at(settings)})",
                                     foreground="#1a8f4e")
+        self.stage_label.configure(text="waiting for a streak")
 
     def stop_watching(self):
         if self.watcher:
@@ -425,50 +443,64 @@ class App(tk.Tk):
         self.log("Stopped watching.")
 
     def fire_alert(self, info):
-        """A streak hit: send the SAVED alert page, one by one."""
+        """Start / loop / end of a streak: send that page (as SAVED), one message at a time."""
+        page = info.get("stage", "start")
         settings = storage.load_settings()
+        blocks, snapshot = storage.page_job(settings, page)
         self.alerts_sent += 1
         self.count_label.configure(text=str(self.alerts_sent))
-        self.log(f"🚨 {info['count']}x {info['SIZE']} on {info['game']} → sending alert messages")
-        self.sender.add_job(f"Alert {info['count']}x {info['SIZE']}", settings["alert_blocks"], info, settings)
+        title = f"{storage.PAGE_TITLES[page]} ({info['count']}x {info['SIZE']})"
+        if page == "end":
+            self.stage_label.configure(text=f"🛑 ended after {info['count']}x {info['SIZE']} — waiting for a new streak")
+        else:
+            self.stage_label.configure(text=f"🔁 following {info['count']}x {info['SIZE']} (Alert Page repeats)")
+        self.log(f"🚨 {title} → sending")
+        self.sender.add_job(title, blocks, info, snapshot)
 
-    def send_test_alert(self):
-        if self.alert_dirty and not messagebox.askyesno(
-                "Unsaved changes", "The Alert Page has unsaved changes.\nThe test sends the SAVED version. Continue?"):
+    def send_test(self, page):
+        """Sends one page as SAVED with pretend numbers (3x Big / 4x Big / ended by a 2)."""
+        if self.dirty.get(page) and not messagebox.askyesno(
+                "Unsaved changes", "This page has unsaved changes.\nThe test sends the SAVED version. Continue?"):
             return
         settings = storage.load_settings()
-        self.sender.add_job("Test alert", settings["alert_blocks"], sample_info(settings["game"]), settings)
+        blocks, snapshot = storage.page_job(settings, page)
+        self.sender.add_job(f"Test {storage.PAGE_TITLES[page]}", blocks,
+                            sample_info(settings["game"], page), snapshot)
 
     # -------------------------------------------------------------------------
-    # Alert Page tab
+    # Start / Alert / End page tabs (same layout, one per stage)
     # -------------------------------------------------------------------------
-    def _build_alert(self, settings):
-        ttk.Label(self.alert_tab, text="Sent to the channel when a streak hits — top to bottom, one by one",
-                  font=("", 13, "bold")).pack(anchor="w")
-        ttk.Label(self.alert_tab, text="Each box: type text (HTML ok: <b>bold</b> <i>italic</i>), add a file, "
-                                       f"and/or paste a message link. Placeholders work in boxes too: {PLACEHOLDERS}",
+    def _build_page(self, tab, page, settings):
+        title = storage.PAGE_TITLES[page]
+        ttk.Label(tab, text=f"{title} — sent top to bottom, one by one", font=("", 13, "bold")).pack(anchor="w")
+        ttk.Label(tab, text=PAGE_HELP[page], foreground="#2f5597").pack(anchor="w")
+        ttk.Label(tab, text="Each box: type text (HTML ok: <b>bold</b> <i>italic</i>), add a file, and/or paste "
+                            "a message link. {placeholders} work in boxes too.",
                   foreground="gray", wraplength=900, justify="left").pack(anchor="w", pady=(0, 4))
 
-        self.alert_dirty = False
-        self.alert_editor = BlocksEditor(self.alert_tab, on_change=lambda: self._set_dirty("alert", True))
-        self.alert_editor.pack(fill="both", expand=True)
-        self.alert_editor.load(settings["alert_blocks"], settings["program_template"])
+        self.dirty[page] = False
+        editor = BlocksEditor(tab, on_change=lambda: self._set_dirty(page, True))
+        editor.pack(fill="both", expand=True)
+        editor.load(settings[f"{page}_blocks"], settings[f"{page}_template"],
+                    storage.DEFAULT_TEMPLATES[page], END_PLACEHOLDERS if page == "end" else "")
+        self.editors[page] = editor
 
-        bar = ttk.Frame(self.alert_tab)
+        bar = ttk.Frame(tab)
         bar.pack(fill="x", pady=(PAD, 0))
-        ttk.Button(bar, text="Add more +", command=self.alert_editor.add_box).pack(side="left")
-        ttk.Button(bar, text="💾 Save", command=self.save_alert).pack(side="left", padx=PAD)
-        self.alert_dirty_label = ttk.Label(bar, text="", foreground="#c55a11")
-        self.alert_dirty_label.pack(side="left")
-        ttk.Button(bar, text="Send test alert", command=self.send_test_alert).pack(side="right")
+        ttk.Button(bar, text="Add more +", command=editor.add_box).pack(side="left")
+        ttk.Button(bar, text="💾 Save", command=lambda: self.save_page(page)).pack(side="left", padx=PAD)
+        self.dirty_labels[page] = ttk.Label(bar, text="", foreground="#c55a11")
+        self.dirty_labels[page].pack(side="left")
+        ttk.Button(bar, text=f"Send test {title}", command=lambda: self.send_test(page)).pack(side="right")
 
-    def save_alert(self):
+    def save_page(self, page):
         settings = storage.load_settings()
-        settings["alert_blocks"] = self.alert_editor.get_blocks()
-        settings["program_template"] = self.alert_editor.program.get_template()
+        editor = self.editors[page]
+        settings[f"{page}_blocks"] = editor.get_blocks()
+        settings[f"{page}_template"] = editor.program.get_template()
         storage.save_settings(settings)
-        self._set_dirty("alert", False)
-        self.log("💾 Alert Page saved.")
+        self._set_dirty(page, False)
+        self.log(f"💾 {storage.PAGE_TITLES[page]} saved.")
 
     # -------------------------------------------------------------------------
     # Broadcast tab
@@ -479,7 +511,7 @@ class App(tk.Tk):
         ttk.Label(self.broadcast_tab, text="Same boxes as the Alert Page, without the program message.",
                   foreground="gray").pack(anchor="w", pady=(0, 4))
 
-        self.broadcast_dirty = False
+        self.dirty["broadcast"] = False
         self.broadcast_editor = BlocksEditor(self.broadcast_tab,
                                              on_change=lambda: self._set_dirty("broadcast", True))
         self.broadcast_editor.pack(fill="both", expand=True)
@@ -489,8 +521,8 @@ class App(tk.Tk):
         bar.pack(fill="x", pady=(PAD, 0))
         ttk.Button(bar, text="Add more +", command=self.broadcast_editor.add_box).pack(side="left")
         ttk.Button(bar, text="💾 Save", command=self.save_broadcast).pack(side="left", padx=PAD)
-        self.broadcast_dirty_label = ttk.Label(bar, text="", foreground="#c55a11")
-        self.broadcast_dirty_label.pack(side="left")
+        self.dirty_labels["broadcast"] = ttk.Label(bar, text="", foreground="#c55a11")
+        self.dirty_labels["broadcast"].pack(side="left")
         ttk.Button(bar, text="📤 Send now", command=self.send_broadcast).pack(side="right")
 
     def save_broadcast(self):
@@ -513,8 +545,9 @@ class App(tk.Tk):
         self.sender.add_job("Broadcast", blocks, sample_info(settings["game"]), settings)
 
     def _set_dirty(self, which, dirty):
-        setattr(self, f"{which}_dirty", dirty)
-        label = getattr(self, f"{which}_dirty_label", None)
+        """Shows / hides '● unsaved changes' next to a page's Save button."""
+        self.dirty[which] = dirty
+        label = self.dirty_labels.get(which)
         if label:
             label.configure(text="● unsaved changes" if dirty else "")
 
@@ -526,7 +559,7 @@ class App(tk.Tk):
         self.token_var = tk.StringVar(value=s["token"])
         self.channel_var = tk.StringVar(value=s["channel"])
         self.game_var = tk.StringVar(value=s["game"])
-        self.alert_at_var = tk.StringVar(value=s["alert_at"])
+        self.start_at_var = tk.StringVar(value=str(storage.get_start_at(s)))
         self.poll_var = tk.StringVar(value=str(s["poll_seconds"]))
         self.delay_var = tk.StringVar(value=str(s["delay_seconds"]))
         self.auto_var = tk.BooleanVar(value=bool(s["auto_start"]))
@@ -535,7 +568,8 @@ class App(tk.Tk):
             ("Bot token", "From @BotFather. The bot must be an ADMIN in your channel."),
             ("Channel", "@mychannel  or  -1001234567890"),
             ("Game", "Which WinGo game to watch"),
-            ("Alert at", "Streak lengths that send the alert, e.g. 3,4  (3 = three Big or Small in a row)"),
+            ("Start at", "Streak length that sends the Start Page (3 = three Big or Small in a row). "
+                         "Then the Alert Page repeats until it breaks → End Page"),
             ("Check every (s)", "Seconds between WinGo checks (2 or more)"),
             ("Delay between messages (s)", "Pause between each message, keeps the order (1 is good)"),
         ]
@@ -547,7 +581,7 @@ class App(tk.Tk):
             token_row,
             ttk.Entry(f, textvariable=self.channel_var, width=50),
             ttk.Combobox(f, textvariable=self.game_var, values=GAMES, state="readonly", width=20),
-            ttk.Entry(f, textvariable=self.alert_at_var, width=20),
+            ttk.Spinbox(f, from_=2, to=10, textvariable=self.start_at_var, width=8),
             ttk.Spinbox(f, from_=2, to=60, textvariable=self.poll_var, width=8),
             ttk.Spinbox(f, from_=0, to=30, increment=0.5, textvariable=self.delay_var, width=8),
         ]
@@ -573,29 +607,26 @@ class App(tk.Tk):
         try:
             poll = max(2, int(float(self.poll_var.get())))
             delay = max(0.0, float(self.delay_var.get()))
+            start_at = max(2, int(float(self.start_at_var.get())))
         except ValueError:
-            messagebox.showwarning("Settings", "'Check every' and 'Delay' must be numbers.")
-            return
-        alert_at = sorted(storage.parse_alert_at(self.alert_at_var.get()))
-        if not alert_at:
-            messagebox.showwarning("Settings", "'Alert at' needs numbers of 2 or more, e.g. 3,4")
+            messagebox.showwarning("Settings", "'Start at', 'Check every' and 'Delay' must be numbers.")
             return
         settings = storage.load_settings()
         settings.update({
             "token": self.token_var.get().strip(),
             "channel": self.channel_var.get().strip(),
             "game": self.game_var.get(),
-            "alert_at": ",".join(map(str, alert_at)),
+            "start_at": start_at,
             "poll_seconds": poll,
             "delay_seconds": delay,
             "auto_start": self.auto_var.get(),
         })
         storage.save_settings(settings)
-        self.alert_at_var.set(settings["alert_at"])
-        self.log("💾 Settings saved." + (" (Watcher picks up the new game/alert numbers on its next check.)"
+        self.start_at_var.set(str(start_at))
+        self.log("💾 Settings saved." + (" (Watcher picks up the new game / Start at on its next check.)"
                                          if self.watcher else ""))
         if self.watcher:
-            self.status_label.configure(text=f"● Watching {settings['game']}  (alert at {settings['alert_at']})")
+            self.status_label.configure(text=f"● Watching {settings['game']}  (start at {start_at})")
 
     def check_bot(self):
         """Checks the token and that the bot can see the channel (in a thread)."""
@@ -637,7 +668,7 @@ class App(tk.Tk):
         self.after(100, self._drain_queue)
 
     def on_close(self):
-        if (self.alert_dirty or self.broadcast_dirty) and not messagebox.askyesno(
+        if any(self.dirty.values()) and not messagebox.askyesno(
                 "Unsaved changes", "You have unsaved message boxes. Close anyway?"):
             return
         if self.watcher:

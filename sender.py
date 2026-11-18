@@ -183,10 +183,15 @@ class Sender(threading.Thread):
 
 
 # Example values used by the "Send test" buttons
-def sample_info(game: str) -> Dict[str, str]:
+def sample_info(game: str, stage: str = "start") -> Dict[str, str]:
+    """Pretend values for a test send: start = 3x Big, loop = 4x Big, end = 4x Big then a 2 (Small)."""
     from wingo import build_info
-    history = [{"issue": "20261118100010644", "number": n, "size": "Big", "color": ""} for n in (7, 9, 8)]
-    return build_info(game, history, "Big", 3, "20261118100010645")
+    numbers = {"start": (7, 9, 8), "loop": (6, 7, 9, 8), "end": (2, 6, 7, 9, 8)}[stage]
+    history = [{"issue": str(20261118100010644 - i), "number": n, "size": "Big" if n >= 5 else "Small",
+                "color": ""} for i, n in enumerate(numbers)]
+    if stage == "end":
+        return build_info(game, history, "Big", 4, "20261118100010645", stage, history[0])
+    return build_info(game, history, "Big", len(numbers), "20261118100010645", stage)
 
 
 _sender: Optional[Sender] = None
